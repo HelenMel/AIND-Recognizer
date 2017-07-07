@@ -75,9 +75,29 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        
+        max_BIC = None; max_model = None
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        for num_states in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=self.verbose).fit(self.X, self.lengths)
+                n_features = hmm_model.n_features
+                logL = hmm_model.score(self.X, self.lengths)
+                p = num_states * num_states + 2 * num_states * n_features - 1
+                N = len(self.X)
+                BIC = -2 * logL + p * math.log(N)
+                if self.verbose:
+                    print("model created for {} with {} states".format(self.this_word, num_states))
+                    print("score {0:.2f}".format(BIC))
+                if max_BIC is None or max_BIC > BIC:
+                    max_BIC = BIC; max_model = hmm_model
+            except:
+                if self.verbose:
+                    print("failure on {} with {} states".format(self.this_word, num_states))
+    
+        return max_model
+
 
 
 class SelectorDIC(ModelSelector):
@@ -92,8 +112,32 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        max_DIC = None; max_model = None
+        
+        for num_states in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=self.verbose).fit(self.X, self.lengths)
+        
+                # find scores for other words
+                other_words_scores = []
+                for (word, (X, length)) in self.hwords.items():
+                    if word == self.this_word:
+                        continue
+                    other_words_scores.append(hmm_model.score(X, length))
+            
+                other_words_scores_average = sum(other_words_scores)/len(other_words_scores)
+                
+                # find difference between this word and all other words
+                this_word_score = hmm_model.score(self.X, self.lengths)
+                DIC = this_word_score - other_words_scores_average
+                if max_DIC is None or max_DIC < DIC:
+                    max_DIC = DIC; max_model = hmm_model
+            except:
+                if self.verbose:
+                    print("failure on {} with {} states".format(self.this_word, num_states))
+        
+        return max_model
 
 
 class SelectorCV(ModelSelector):
@@ -103,6 +147,40 @@ class SelectorCV(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        
+        max_CV_score = None; max_model = None
+        for num_states in range(self.min_n_components, self.max_n_components + 1):
+            hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                        random_state=self.random_state, verbose=self.verbose)
+            scores = []
+            
+            split_n = len(self.sequences) if len(self.sequences) < 3 else 3
+            if split_n == 1:
+                try:
+                    scores.append(hmm_model.fit(self.X, self.lengths).score(self.X, self.lengths))
+                    if self.verbose:
+                        print("model created for {} with {} states".format(self.this_word, num_states))
+                        print("score {0:.2f}".format(s))
+                except:
+                    if self.verbose:
+                        print("failure on {} with {} states".format(self.this_word, num_states))
+            else:
+                split_method = KFold(n_splits=split_n, random_state=self.random_state)
+                for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                    try:
+                        train_x, train_lengths = combine_sequences(cv_train_idx, self.sequences)
+                        test_x, test_length = combine_sequences(cv_test_idx, self.sequences)
+                        scores.append(hmm_model.fit(train_x, train_lengths).score(test_x, test_length))
+                        if self.verbose:
+                            print("model created for {} with {} states".format(self.this_word, num_states))
+                            print("score {0:.2f}".format(s))
+                    except:
+                        if self.verbose:
+                            print("failure on {} with {} states".format(self.this_word, num_states))
+            if len(scores) > 0:
+                CV_score = np.array(scores).mean()
+                if max_CV_score is None or max_CV_score < CV_score:
+                    max_CV_score = CV_score; max_model = hmm_model
+    
+        return max_model
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
